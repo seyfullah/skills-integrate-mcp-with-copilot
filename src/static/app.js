@@ -3,6 +3,13 @@ document.addEventListener("DOMContentLoaded", () => {
   const activitySelect = document.getElementById("activity");
   const signupForm = document.getElementById("signup-form");
   const messageDiv = document.getElementById("message");
+  const signupContainer = document.getElementById("signup-container");
+  const accountButton = document.getElementById("account-button");
+  const loginDialog = document.getElementById("login-dialog");
+  const loginForm = document.getElementById("login-form");
+  const loginError = document.getElementById("login-error");
+  const cancelLogin = document.getElementById("cancel-login");
+  let isTeacher = false;
 
   // Function to fetch activities from API
   async function fetchActivities() {
@@ -12,6 +19,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // Clear loading message
       activitiesList.innerHTML = "";
+      activitySelect
+        .querySelectorAll("option:not(:first-child)")
+        .forEach((option) => option.remove());
 
       // Populate activities list
       Object.entries(activities).forEach(([name, details]) => {
@@ -29,8 +39,11 @@ document.addEventListener("DOMContentLoaded", () => {
               <ul class="participants-list">
                 ${details.participants
                   .map(
-                    (email) =>
-                      `<li><span class="participant-email">${email}</span><button class="delete-btn" data-activity="${name}" data-email="${email}">❌</button></li>`
+                    (email) => `<li><span class="participant-email">${email}</span>${
+                      isTeacher
+                        ? `<button class="delete-btn" data-activity="${name}" data-email="${email}" aria-label="Unregister ${email}">❌</button>`
+                        : ""
+                    }</li>`
                   )
                   .join("")}
               </ul>
@@ -69,7 +82,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Handle unregister functionality
   async function handleUnregister(event) {
-    const button = event.target;
+    const button = event.currentTarget;
     const activity = button.getAttribute("data-activity");
     const email = button.getAttribute("data-email");
 
@@ -155,6 +168,84 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // Initialize app
-  fetchActivities();
+  accountButton.addEventListener("click", async () => {
+    if (!isTeacher) {
+      loginError.classList.add("hidden");
+      loginForm.reset();
+      loginDialog.showModal();
+      return;
+    }
+
+    try {
+      const response = await fetch("/auth/logout", { method: "POST" });
+      if (!response.ok) {
+        throw new Error("Unable to log out");
+      }
+      isTeacher = false;
+      updateTeacherView();
+      fetchActivities();
+    } catch (error) {
+      console.error("Error logging out:", error);
+    }
+  });
+
+  cancelLogin.addEventListener("click", () => loginDialog.close());
+
+  loginForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    loginError.classList.add("hidden");
+    const credentials = {
+      username: document.getElementById("username").value,
+      password: document.getElementById("password").value,
+    };
+
+    try {
+      const response = await fetch("/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(credentials),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        loginError.textContent = result.detail || "Unable to log in";
+        loginError.classList.remove("hidden");
+        return;
+      }
+
+      isTeacher = true;
+      loginDialog.close();
+      updateTeacherView(result.username);
+      fetchActivities();
+    } catch (error) {
+      loginError.textContent = "Failed to log in. Please try again.";
+      loginError.classList.remove("hidden");
+      console.error("Error logging in:", error);
+    }
+  });
+
+  function updateTeacherView(username = "") {
+    signupContainer.hidden = !isTeacher;
+    accountButton.title = isTeacher ? `Log out ${username}` : "Teacher login";
+    accountButton.setAttribute(
+      "aria-label",
+      isTeacher ? `Log out ${username}` : "Teacher login"
+    );
+  }
+
+  async function initialize() {
+    try {
+      const response = await fetch("/auth/status");
+      if (!response.ok) {
+        throw new Error("Unable to check teacher login");
+      }
+      const status = await response.json();
+      isTeacher = status.authenticated;
+      updateTeacherView(status.username);
+    } catch (error) {
+      console.error("Error checking teacher login:", error);
+    }
+    fetchActivities();
+  }
+
+  initialize();
 });
